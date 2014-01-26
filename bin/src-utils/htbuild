@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2007-2012 Hypertable, Inc.
+#
+# This file is part of Hypertable.
+#
+# Hypertable is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or any later version.
+#
+# Hypertable is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Hypertable. If not, see <http://www.gnu.org/licenses/>
+#
+
+# This script sets up build environment on a target machine and/or
+# build binary packages
+
+SELF=`type -p $0`
+
+# Keeps some states of source packages, mostly for restartability
+VAR_DIR=/var/opt/htbuild
+
+# default values
+REPO_URL=git://scm.hypertable.org/pub/repos/hypertable.git
+REPO_BRANCH=master
+BUILD_TYPE=Release
+TESTS=core
+BUILD_SYS=`uname -s | tr A-Z a-z`
+BUILD_MACH=`uname -m`
+WORK_DIR=htbuild-dir
+FORCE=
+
+NUM_PROCS=`grep -c processor < /proc/cpuinfo || echo 1`
+
+case $BUILD_MACH in
+  i[3-6]86) BUILD_MACH=i386
+esac
+
+if [ -f /etc/debian_version ]; then
+  TARGET=linux_with_deb
+elif [ -f /etc/redhat-release ]; then
+  TARGET=linux_with_rpm
+else
+  TARGET=not_supported_yet
+fi
+
+# helper functions
+get() {
+  url=$1
+  out=${2:-`basename $url`}
+  curl -L "$url" -o "$out"
+}
+
+set_installed() {
+  touch $VAR_DIR/installed/$1
+}
+
+installed() {
+  test x$FORCE = x -a -f $VAR_DIR/installed/$1
+}
+
+_install_cmake() {
+  get http://www.cmake.org/files/v2.6/cmake-2.6.4.tar.gz cmake.tgz
+  tar zxf cmake.tgz
+  (cd cmake-2.6.4 && ./bootstrap --prefix=/usr && make && make install)
+}
+
+_install_log4cpp() {
+  get http://sourceforge.net/projects/log4cpp/files/log4cpp-1.0.x%20%28current%29/log4cpp-1.0/log4cpp-1.0.tar.gz/download log4cpp.tgz
+  tar zxf log4cpp.tgz
+  (cd log4cpp-1.0 && ./configure && make && make install)
+}
+
+_install_libunwind() {
+  get http://download.savannah.gnu.org/releases/libunwind/libunwind-0.99-beta.tar.gz libunwind.tgz
+  tar zxf libunwind.tgz
+  (cd libunwind-0.99-beta && bash configure && make && make install)
+}
+
+_install_tcmalloc() {
+  _install_libunwind || return 1
+  get http://google-perftools.googlecode.com/files/google-perftools-1.4.tar.gz tcmalloc.tgz
+  tar zxf tcmalloc.tgz
+  (cd google-perftools-1.4 && ./configure && make && make install)
+}
+
+_install_boost() {
+  get http://sourceforge.net/projects/boost/files/boost/1.40.0/boost_1_40_0.tar.bz2/download boost.tbz2
+  tar jxf boost.tbz2
+  (cd boost_1_40_0 && ./bootstrap.sh --with-libraries=filesystem,iostreams,program_options,system,thread && ./bjam install)
+}
+
+_install_bdb() {
+  get http://download.oracle.com/berkeley-db/db-4.8.26.tar.gz bdb.tgz
+  tar zxf bdb.tgz
+  (cd db-4.8.26/build_unix && ../dist/configure --enable-cxx && make &&
+      make install && echo /usr/local/BerkeleyDB.4.8/lib \
+      > /etc/ld.so.conf.d/bdb.conf)
+}
+
+_install_sigar() {
+  name=hyperic-sigar-1.6.3
+  get http://sourceforge.net/projects/sigar/files/sigar/1.6/$name.tar.gz/download sigar.tgz
+  tar zxf sigar.tgz
+  cp $name/sigar-bin/include/*.h /usr/local/include
+  case $BUILD_MACH in
+    i386|i686)  m=x86;;
+    x86_64)     m=amd64;;
+  esac
+  cp $name/sigar-bin/lib/*sigar-$m-$BUILD_SYS.* /usr/local/lib &&
+      echo /usr/local/lib > /etc/ld.so.conf.d/local.conf
+}
+
+_install_thrift() {
+  get http://hypertable.org/pub/thrift-0.2.0-incubating.tar.gz thrift.tgz
+  tar zxf thrift.tgz
+
+  if [ "$SETUP_DEV_ENV" ]; then
+    confargs=
+    # handle ubuntu python packaging
+    pylib=`python -c 'import sys; print sys.path[1]'`
+    [ -d $pylib/dist-packages ] &&
+        ln -sf $pylib/dist-packages $pylib/site-packages
+  else
+    confargs="--without-py --without-perl --without-ruby"
+  fi
+
+  (cd thrift && ./configure $confargs && make && make install)
+}
+
+_install_kfs() {
+  get http://downloads.sourceforge.net/project/kosmosfs/kosmosfs/kfs-0.4/kfs-0.4.tar.gz kfs.tgz
+  tar zxf kfs.tgz
+  (cd kfs-0.4 && mv CMakeLists.txt CMakeLists.txt.orig && sed \
+      -e 's/"1.37" "1.38")/"1.37" "1.38" "1.39" "1.40")/' \
+      -e 's/NOT ${JAVA_INCLUDE_PATH} STREQUAL ""/JAVA_INCLUDE_PATH/' \
+        CMakeLists.txt.orig > CMakeLists.txt &&
+      mkdir -p build && cd build &&
+      cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DCMAKE_INSTALL_PREFIX=/opt/kfs .. &&
+      make install)
+}
+
+e_install_ceph() {
+  get http://ceph.newdream.net/download/ceph-0.19.tar.gz ceph.tgz
+  tar zxf ceph.tgz
+  (cd ceph-0.19 && ./autogen.sh && ./configure && make && make install)
+  chmod 644 /usr/local/include/ceph/*.h
+}
+
+has_command() {
+  type $1 > /dev/null 2>&1
+}
+
+do_install() {
+  for i in "$@"; do
+    if has_command install_$i; then
+      install_$i || exit 1
+    elif has_command _install_$i; then
+      installed $i && continue
+      _install_$i || exit 1
+      set_installed $i
+    else
+      echo "Unknown install target: $i"
+    fi
+  done
+}
+
+build_hypertable() {
+  [ "$SETUP_DEV_ENV" ] && return 0
+
+  if [ -d hypertable ]; then
+    (cd hypertable && git pull)
+  else
+    git clone $REPO_URL hypertable || exit 1
+  fi
+
+  cur_branch=`cd hypertable && git symbolic-ref HEAD | sed 's/^refs.heads.//'`
+
+  if [ "$cur_branch" != "$REPO_BRANCH" ]; then
+    (cd hypertable && git checkout -b $REPO_BRANCH origin/$REPO_BRANCH)
+  fi
+
+  mkdir -p hypertable/build
+
+  case $TESTS in
+    core|all)    runtests="make ${TESTS}tests";;
+    skip)        runtests=/bin/true;;
+    *) echo "Unknown tests: $TESTS, skipped"; runtests=/bin/true;;
+  esac
+
+  (cd hypertable/build && cmake -DCMAKE_BUILD_TYPE=$BUILD_TYPE .. &&
+      make -j $((NUM_PROCS+1)) install && $runtests &&
+      ../bin/src-utils/htpkg --srcdir .. --build $BUILD_TYPE ${GENERATORS[*]})
+}
+
+disable_prelink() {
+  if [ -f /etc/sysconfig/prelink ]; then
+    (cd /etc/sysconfig && mv prelink prelink.orig &&
+        sed 's/PRELINKING=yes/PRELINKING=no/' prelink.orig > prelink)
+    prelink -ua
+  fi
+}
+
+rpm_setup_repos() {
+  disable_prelink
+  yum install -y ntpdate curl curl-devel || exit 1
+  ntpdate -b -u pool.ntp.org
+}
+
+install_dev_env_from_src() {
+  do_install cmake log4cpp tcmalloc boost bdb sigar thrift kfs ceph 
+  # need to disable selinux (on Fedora/CentOS etc.) or ldconfig would fail
+  # because some libraries like Berkeley DB shared libraries are installed
+  # in a non-standard directory if compiled from source. This is and is
+  # required for regression tests to finish properly. The normal usage of
+  # binary packages themselves doesn't require selinux to be off.
+  has_command setenforce && setenforce 0
+  ldconfig
+}
+
+rpm_install_dev_env() {
+  yum install -y gcc-c++ make bzip2-devel zlib-devel expat-devel git-core \
+      libevent-devel readline-devel ncurses-devel bison flex pkgconfig \
+      subversion rpm-build xfsprogs-devel openssl-devel
+
+  yum install -y log4cpp-devel && set_installed log4cpp
+
+  case `yum info cmake | grep Version` in
+    Version*:*2.6*) yum install -y cmake && set_installed cmake;;
+  esac
+
+  case `yum info boost-devel | grep Version` in
+    Version*:*1.3[5-9]*|Version*:*1.4*)
+        yum install -y boost-devel && set_installed boost;;
+  esac
+
+  if [ "$SETUP_DEV_ENV" ]; then
+    yum install -y perl-Bit-Vector php python-devel ruby-devel graphviz \
+        doxygen libtool automake
+    get http://dag.wieers.com/rpm/packages/perl-Class-Accessor/perl-Class-Accessor-0.31-1.el5.rf.noarch.rpm perlCA.rpm
+    yum localinstall perlCA.rpm
+
+    case `javac -version 2>&1` in
+      javac*1.6);;
+      *) echo "Hypertable requires JDK 1.6 for Java development";;
+    esac
+  fi
+
+  install_dev_env_from_src
+}
+
+deb_setup_repos() {
+  grep ceph /etc/apt/sources.list ||
+      echo 'deb http://ceph.newdream.net/debian/ stable main' \
+      >> /etc/apt/sources.list
+
+  apt-get update || exit 1
+  apt-get install -y curl ntpdate
+  ntpdate -b -u pool.ntp.org
+}
+
+deb_install_dev_env() {
+  apt-get install -y g++ make git-core libevent-dev zlib1g-dev libbz2-dev \
+      libexpat1-dev libncurses-dev libreadline5-dev bison flex pkg-config \
+      subversion xfslibs-dev libssl-dev rpm
+  apt-get -y install liblog4cpp5-dev && set_installed log4cpp
+  apt-get -y --force-yes install libceph-dev && set_installed ceph
+
+  case `aptitude show cmake | grep Version:` in
+    Version:*2.6*) apt-get install -y cmake && set_installed cmake;;
+  esac
+
+  case `aptitude search 'libdb4.*\+\+-dev'` in
+    *libdb4.7++-dev*) apt-get install -y libdb4.7++-dev && set_installed bdb;;
+    *libdb4.6++-dev*) apt-get install -y libdb4.6++-dev && set_installed bdb;;
+  esac
+
+  case `aptitude search 'libboost1.*-dev'` in
+    *libboost1.37-dev*)
+      apt-get install -y libboost1.37-dev && set_installed boost;;
+    *libboost1.35-dev*)
+      apt-get install -y libboost1.35-dev && set_installed boost;;
+  esac
+
+  if [ "$SETUP_DEV_ENV" ]; then
+    apt-get install -y ant php5 php5-cli ruby ruby-dev libhttp-access2-ruby \
+        libbit-vector-perl graphviz doxygen sun-java6-jdk libtool automake
+  fi
+
+  install_dev_env_from_src
+}
+
+do_linux_with_rpm() {
+  rpm_setup_repos
+  rpm_install_dev_env
+  build_hypertable
+}
+
+do_linux_with_deb() {
+  deb_setup_repos
+  deb_install_dev_env
+  build_hypertable
+}
+
+install_dev_env() {
+  SETUP_DEV_ENV=1
+  do_$TARGET
+}
+
+do_remote() {
+  [ "$BUILD_HOST" ] || { echo "--host <host> required"; exit 1; }
+
+  while true; do
+    ssh $SSH_OPTS root@$BUILD_HOST mkdir -p $WORK_DIR
+    [ $? = 0 ] && break;
+    echo "Waiting for $BUILD_HOST to be ready..."
+    sleep 3
+  done
+
+  case $FORCE in
+    1|[yY]*)    force=--force;;
+    *)          force=;;
+  esac
+
+  scp $SSH_OPTS $SELF root@$BUILD_HOST:$WORK_DIR
+  ssh $SSH_OPTS root@$BUILD_HOST bash -x $WORK_DIR/`basename $SELF` \
+      --build $BUILD_TYPE --repo $REPO_URL --branch $REPO_BRANCH \
+      --tests $TESTS --workdir $WORK_DIR --install "'${INSTALLS[*]}'" \
+      $force ${GENERATORS[*]}
+
+  if [ ${#INSTALLS} -eq 0 ]; then
+    scp $SSH_OPTS root@$BUILD_HOST:$WORK_DIR/hypertable/build/hypertable-* .
+  fi
+}
+
+run_ami() {
+  ec2-run-instances $1 -n 1 -k ht -g hypertable -t `instance_type $1` |
+      grep ami- | cut -f2
+}
+
+instance_type() {
+  # Amazon should pick the smallest instance type available for a
+  # given architecture if instance type is not specified
+  t=`ec2-describe-images $1 | cut -f8`
+
+  case $t in
+    i386)       echo m1.small;;
+    x86_64)     echo m1.large;;
+    *)          echo "Unknown instance type: $t"; exit 1;;
+  esac
+}
+
+do_ami() {
+  [ "$BUILD_AMI" ] || { echo "--ami <ami> required"; exit 1; }
+
+  echo -n "Launching $BUILD_AMI "
+  instance=`run_ami $BUILD_AMI`
+  echo "=> $instance"
+  [ "$instance" ] || exit 1
+
+  while true; do
+    echo "Waiting for $instance to come up..."
+    sleep 3
+    BUILD_HOST=`ec2-describe-instances $instance | grep ami- | cut -f4`
+    [ "$BUILD_HOST" ] && break
+  done
+  echo "Instance hostname: $BUILD_HOST"
+
+  # having to wait and type yes is annoying so:
+  SSH_OPTS="-o StrictHostKeyChecking=no -o PasswordAuthentication=no"
+  do_remote
+
+  ec2-terminate-instances $instance
+}
+
+sanity_check() {
+  has_command do_$TARGET || { echo "$TARGET not supported"; exit 1; }
+
+  if [ ${#INSTALLS} -eq 0 -a ${#GENERATORS} -eq 0 ]; then
+    echo "one or more generators required"
+    exit 1
+  fi
+}
+
+usage_exit() {
+  echo "Usage: htbuild [<Options>] generators..."
+  echo ""
+  echo "  Builds Hypertable binary packages on Linux (soon others) based OS"
+  echo ""
+  echo "Options:"
+  echo "  --ami <ami>           EC2 image name"
+  echo "  --host <host>         Hostname of remote target"
+  echo "  --target <target>     linux_with_deb|linux_with_rpm|remote|ami"
+  echo "  --mach <machine>      i386|x86_64|etc..."
+  echo "  --build <type>        Release|Debug|RelWithDebInfo"
+  echo "  --repo <url>          git repo url"
+  echo "  --branch <branch>     git repo branch/commit"
+  echo "  --tests <tests>       core|all|skip"
+  echo "  --workdir <dir>       working directory"
+  echo "  --install <src>       source package to install (multiple options)"
+  echo "  --force               force reinstall source packages"
+  echo "  <generators>          RPM, DEB and TBZ2 etc. See cpack(1)"
+  exit $1;
+}
+
+[ $# -gt 0 ] || usage_exit
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --ami)      BUILD_AMI=$2;   TARGET=ami;     shift;;
+    --host)     BUILD_HOST=$2;  TARGET=remote;  shift;;
+    --target)   TARGET=$2;                      shift;;
+    --mach)     BUILD_MACH=$2;                  shift;;
+    --build)    BUILD_TYPE=$2;                  shift;;
+    --repo)     REPO_URL=$2;                    shift;;
+    --branch)   REPO_BRANCH=$2;                 shift;;
+    --tests)    TESTS=$2;                       shift;;
+    --workdir)  WORK_DIR=$2;                    shift;;
+    --install)  INSTALLS[${#INSTALLS[*]}]=$2;   shift;;
+    --force)    FORCE=1;;
+    -h|--help)  usage_exit;;
+    -*)         echo "Unknown option: $1";      exit;;
+    *)          GENERATORS[${#GENERATORS[*]}]=$1;;
+  esac
+  shift
+done
+
+echo "$0 ($TARGET) started:" `date`
+
+sanity_check
+
+case $TARGET in
+  ami|remote)   ;;
+  *) mkdir -p $VAR_DIR/installed || exit 1
+     mkdir -p $WORK_DIR && cd $WORK_DIR;;
+esac
+
+if [ ${#INSTALLS} -eq 0 -o "$BUILD_AMI" -o "$BUILD_HOST" ]; then
+  do_$TARGET
+elif [ ${#INSTALLS} -gt 0 ]; then
+  do_install ${INSTALLS[*]}
+fi
+
+echo "$0 finished:" `date`

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path="Core"/>
+	<classpathentry kind="src" path="Hive"/>
+	<classpathentry kind="src" path="MapReduce"/>
+	<classpathentry kind="src" path="ThriftClient"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/commons-cli-1.2.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/commons-configuration-1.6.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/commons-httpclient-3.1.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/commons-logging-1.0.4.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/guava-r09-jarjar.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/hbase-0.90.6-cdh3u5.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/hive-exec-0.7.1-cdh3u5.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/hive-metastore-0.7.1-cdh3u5.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/hive-serde-0.7.1-cdh3u5.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/junit-4.3.1.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/libthrift-0.8.0.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/log4j-1.2.13.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/slf4j-api-1.5.8.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/slf4j-log4j12-1.5.8.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/commons-io-2.1.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/guava-11.0.2.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/hadoop-auth-2.0.0-cdh4.3.0.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/hadoop-common-2.0.0-cdh4.3.0.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/hadoop-hdfs-2.0.0-cdh4.3.0.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/hadoop-mapreduce-client-core-2.0.0-cdh4.3.0.jar"/>
+	<classpathentry kind="lib" path="/home/fotu/work-code/cloudspace/hypertable-0.9.7.11/lib/cdh4/protobuf-java-2.4.0a.jar"/>
+	<classpathentry kind="output" path="eclipse-builder"/>
+</classpath>

@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2007-2012 Hypertable, Inc.
+#
+# This file is part of Hypertable.
+#
+# Hypertable is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or any later version.
+#
+# Hypertable is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Hypertable. If not, see <http://www.gnu.org/licenses/>
+#
+export HYPERTABLE_HOME=$(cd `dirname "$0"`/.. && pwd)
+. $HYPERTABLE_HOME/bin/ht-env.sh
+
+print_help() {
+  echo "Usage: $0 [Command] [Options]"
+  echo "Commands:"
+  echo "  start <Service> [ServiceOptions]    See start <service> --help for"
+  echo "                                      for service options"
+  echo "      valid <Service>: all-servers, dfsbroker, hyperspace, master"
+  echo "                       rangeserver, thriftbroker, test-servers"
+  echo "  restart <Service> [ServiceOptions]  Restart <Service>"
+  echo "      valid <Service>: dfsbroker, hyperspace, master, rangeserver, "
+  echo "                       thriftbroker"
+  echo "  stop <Service>                      Stop any running <Service>"
+  echo "      valid <Service>: dfsbroker, hyperspace, master, rangeserver, "
+  echo "                       thriftbroker, servers"
+  echo "  clean-databases                     Remove all existing databases"
+  echo "  ldd <executable>                    Print dynamic linking info"
+  echo "  shell [ShellOptions]                See shell --help for options"
+  echo "  version                             Show version info"
+  echo "  help                                Show this help"
+}
+
+do_start() {
+  service=$1; shift
+  exec $HYPERTABLE_HOME/bin/start-$service.sh "$@"
+}
+
+do_stop() {
+  service=$1; shift
+  if [ -x $HYPERTABLE_HOME/bin/stop-$service.sh ]; then
+    exec $HYPERTABLE_HOME/bin/stop-$service.sh "$@"
+  fi
+  pidfile=`server_pidfile $service`
+  stop_server $service &&
+  sleep 1 &&
+  wait_for_server_shutdown $service `basename $pidfile .pid` "$@"
+}
+
+do_restart() {
+  service=$1
+  if [ -x $HYPERTABLE_HOME/bin/restart-$service.sh ]; then
+    shift;
+    exec $HYPERTABLE_HOME/bin/restart-$service.sh "$@"
+  fi
+  do_stop "$@"
+  do_start "$@"
+}
+
+do_cmd() {
+  cmd=$1; shift
+  [ "$cmd" ] || { print_help; exit; }
+  if [ -x $HYPERTABLE_HOME/bin/$cmd ]; then
+    exec $HYPERTABLE_HOME/bin/$cmd "$@"
+  elif [ -x $HYPERTABLE_HOME/bin/$cmd.sh ]; then
+    exec $HYPERTABLE_HOME/bin/$cmd.sh "$@"
+  elif [ -x $HYPERTABLE_HOME/bin/ht_$cmd ]; then
+    exec $HYPERTABLE_HOME/bin/ht_$cmd "$@"
+  fi
+  exec $cmd "$@";
+}
+
+print_version() {
+  $HYPERTABLE_HOME/bin/hypertable --version
+  echo "  Hadoop:" `basename $HYPERTABLE_HOME/lib/java/hadoop-*.jar .jar |
+                    sed 's/hadoop-\([^-]*\)-.*/\1/'`
+  if [ -x $HYPERTABLE_HOME/bin/kosmosBroker ]; then
+    echo " " `$HYPERTABLE_HOME/bin/kosmosBroker --kfs-version`
+  fi
+  if [ -x $HYPERTABLE_HOME/bin/cephBroker ]; then
+    echo " " `$HYPERTABLE_HOME/bin/cephBroker --ceph-version`
+  fi
+  echo "  BerkeleyDB:" @BDB_VERSION@
+  echo "  Boost:" @BOOST_VERSION@
+  echo "  Thrift:" @Thrift_VERSION@
+  [ "@Tcmalloc_LIBRARIES@" ] && echo "  Tcmalloc: @TC_VERSION@"
+  [ "@JAVAC_VERSION@" ] && echo "  Javac: @JAVAC_VERSION@"
+  [ "@GCC_VERSION@" ] && echo "  GCC/G++: @GCC_VERSION@"
+}
+
+cmd=$1
+shift
+
+case $cmd in
+  start)        do_start "$@";;
+  stop)         do_stop "$@";;
+  restart)      do_restart "$@";;
+  shell)        exec $HYPERTABLE_HOME/bin/hypertable "$@";;
+  version|-v|--version) print_version;;
+  help|-h|--help) print_help;;
+  /*)           exec $cmd "$@";;
+  *)            do_cmd "$cmd" "$@";;
+esac

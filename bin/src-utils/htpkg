@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+build=Release
+srcdir=$HOME/Source/hypertable
+thriftdir=/usr/src/thrift
+
+usage_exit() {
+  echo "Usage: htpkg [Options] <generator>..."
+  echo ""
+  echo "Options:"
+  echo "  --build <type>       Build type: Release|Debug|RelWithDebInfo"
+  echo "  --srcdir <dir>       Hypertable source directory"
+  echo "  --thriftdir <dir>    Toplevel Thrift source directory"
+  echo "  --thriftbroker-only  Build thriftbroker-only package"
+  echo ""
+  exit $1
+}
+
+while [ "$1" != "${1##-}" ]; do
+  case $1 in
+    --build)    build=$2;       shift;;
+    --srcdir)   srcdir=$2;      shift;;
+    --thriftdir)   thriftdir=$2;      shift;;
+    --thriftbroker-only)   tbonly=true;;
+    *)          usage_exit 1
+  esac
+  shift
+done
+
+opts="-DCMAKE_BUILD_TYPE=$build -DTHRIFT_SOURCE_DIR=$thriftdir"
+
+for gen in "$@"; do
+  if [ "x$tbonly" == "xtrue" ]; then
+    cmake $opts -DPACKAGE_THRIFTBROKER=1 $srcdir
+    cpack -G $gen
+  else
+    cmake $opts -DPACKAGE_THRIFTBROKER= $srcdir
+    cpack -G $gen
+  fi
+done

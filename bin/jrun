@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# Copyright (C) 2007-2012 Hypertable, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The installation directory
+export HYPERTABLE_HOME=$(cd `dirname "$0"`/.. && pwd)
+. $HYPERTABLE_HOME/bin/ht-env.sh
+
+# Parse and remove jrun specific arguments
+DEBUG_ARGS=
+
+# Setup CLASSPATH
+CLASSPATH="${HYPERTABLE_HOME}"
+
+while [ $# -gt 1 ] ; do
+  if [ "--pidfile" = "$1" ] ; then
+    shift
+    echo "$$" > $1
+    shift
+  elif [ "--debug" = "$1" ] ; then
+    DEBUG_ARGS="-Xrunjdwp:transport=dt_socket,address=8000,server=y,suspend=n\
+                -Xdebug"
+    shift
+  elif [ "--add-to-classpath" = "$1" ] ; then
+    shift
+    CLASSPATH=${CLASSPATH}:$1
+    shift
+  elif [ "--verbose" = "$1" ] ; then
+    shift
+  else
+    break
+  fi
+done
+
+# Make sure configured for Hadoop distro
+DISTRO=
+if [ -e $HYPERTABLE_HOME/conf/hadoop-distro ]; then
+  DISTRO=`cat $HYPERTABLE_HOME/conf/hadoop-distro`
+fi
+HT_JAR=`ls -1 $HYPERTABLE_HOME/lib/java/*.jar | grep "hypertable-[^-]*.jar" | awk 'BEGIN {FS="/"} {print $NF}'`
+if [ -z "$HT_JAR" ] || [ -z "$DISTRO" ]; then
+    if [ -z "$DISTRO" ]; then
+      echo "No Hadoop distro is configured.  Run the following script to"
+      echo "configure:"
+      echo ""
+      echo "$HYPERTABLE_HOME/bin/set-hadoop-distro.sh"
+      exit 1
+    fi
+    $HYPERTABLE_HOME/bin/set-hadoop-distro.sh $DISTRO
+else
+    diff $HYPERTABLE_HOME/lib/java/$HT_JAR $HYPERTABLE_HOME/lib/java/$DISTRO/$HT_JAR > /dev/null
+    if [ $? -ne 0 ]; then
+        $HYPERTABLE_HOME/bin/set-hadoop-distro.sh $DISTRO        
+    fi
+fi
+
+# for developers, add Hadoop classes to CLASSPATH
+if [ -d "$HYPERTABLE_HOME/build/classes" ]; then
+  CLASSPATH=${CLASSPATH}:$HYPERTABLE_HOME/build/classes
+fi
+if [ -d "$HYPERTABLE_HOME/build/webapps" ]; then
+  CLASSPATH=${CLASSPATH}:$HYPERTABLE_HOME/build
+fi
+if [ -d "$HYPERTABLE_HOME/build/test/classes" ]; then
+  CLASSPATH=${CLASSPATH}:$HYPERTABLE_HOME/build/test/classes
+fi
+
+# so that filenames w/ spaces are handled correctly in loops below
+IFS=
+
+# for releases, add core hadoop jar & webapps to CLASSPATH
+if [ -d "$HYPERTABLE_HOME/webapps" ]; then
+  CLASSPATH=${CLASSPATH}:$HYPERTABLE_HOME
+fi
+
+# add thrift to classpath
+for f in $HYPERTABLE_HOME/lib/java/libthrift*.jar; do
+  CLASSPATH=${CLASSPATH}:$f;
+done
+
+# add lib/java to CLASSPATH
+for f in $HYPERTABLE_HOME/lib/java/*.jar; do
+  CLASSPATH=${CLASSPATH}:$f;
+done
+
+for f in $HYPERTABLE_HOME/lib/jetty-ext/*.jar; do
+  CLASSPATH=${CLASSPATH}:$f;
+done
+
+unset IFS
+
+
+#
+# run it
+#
+if [ "$JAVA_HOME" != "" ] ; then
+  exec $JAVA_HOME/bin/java $DEBUG_ARGS -classpath "$CLASSPATH" "$@"
+else
+  exec java $DEBUG_ARGS -classpath "$CLASSPATH" "$@"
+fi
